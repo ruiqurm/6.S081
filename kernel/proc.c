@@ -700,3 +700,18 @@ procdump (void)
     printf ("\n");
   }
 }
+
+int
+proccount(void)
+{
+  struct proc *p;
+  int count = 0;
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire (&p->lock);
+    if (p->state != UNUSED) {
+      count++;
+    }
+    release (&p->lock);
+  }
+  return count;
+}
