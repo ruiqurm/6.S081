@@ -121,12 +121,26 @@ found:
     return 0;
   }
 
+  // ADD: kernel page table
+  p->kpagetable = kvmpgtbl();
+  if(p->kpagetable==0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  char *pa = kalloc();
+  if(pa == 0)
+      panic("kalloc");
+  uint64 va = KSTACK((int) (p - proc));
+  ukvmmap(p->kpagetable,va,(uint64)pa,PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  
   return p;
 }
 
@@ -141,6 +155,8 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if(p->kpagetable)
+    proc_freekpagetable(p->kpagetable,0);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -195,6 +211,22 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmfree(pagetable, sz);
 }
 
+void
+proc_freekpagetable(pagetable_t pagetable,int level)
+{
+  if(level == 2){
+    kfree((void*)pagetable);
+    return;
+  }
+  for(int i=0;i<512;i++){
+    pte_t pte = pagetable[i];
+    if((pte && PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // 中间节点 
+      proc_freekpagetable(pagetable,level+1);
+    }
+  }
+  kfree(pagetable);
+}
 // a user program that calls exec("/init")
 // od -t xC initcode
 uchar initcode[] = {
@@ -458,7 +490,6 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
@@ -473,12 +504,15 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        // ADD: 
+        w_satp(MAKE_SATP(p->kpagetable)); // 载入kernel页表
+        sfence_vma(); // 刷新TLB缓存
         swtch(&c->context, &p->context);
-
+        
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
-
         found = 1;
       }
       release(&p->lock);

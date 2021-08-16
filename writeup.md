@@ -42,3 +42,5 @@ vmprint(pagetable_t pagetable,int level){
   // ...
 ```
 
+# A kernel page table per process
+这个lab的测试似乎有点问题，我第一遍写的时候其实并没有符合要求，然而还是过了.后面看了别人的写法才发现自己写的不对。  

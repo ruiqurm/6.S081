@@ -5,7 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-
+#include "spinlock.h"
+#include "proc.h"
 /*
  * the kernel's page table.
  */
@@ -45,6 +46,24 @@ kvminit()
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+}
+
+void uvmmap(pagetable_t pgtable,uint64 va, uint64 pa, uint64 sz, int perm);
+// 做一份内核的页表
+void*
+kvmpgtbl()
+{
+  pagetable_t table = (pagetable_t) kalloc();
+  if(!table) return 0;
+  memset(table, 0, PGSIZE);
+  ukvmmap(table,UART0, UART0, PGSIZE, PTE_R | PTE_W);
+  ukvmmap(table,VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+  ukvmmap(table,CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  ukvmmap(table,PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+  ukvmmap(table,KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+  ukvmmap(table,(uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+  ukvmmap(table,TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  return table;
 }
 
 // Switch h/w page table register to the kernel's page table,
@@ -121,6 +140,12 @@ kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
     panic("kvmmap");
 }
 
+void
+ukvmmap(pagetable_t table,uint64 va, uint64 pa, uint64 sz, int perm)
+{
+  if(mappages(table, va, sz, pa, perm) != 0)
+    panic("kvmmap");
+}
 // translate a kernel virtual address to
 // a physical address. only needed for
 // addresses on the stack.
@@ -132,7 +157,7 @@ kvmpa(uint64 va)
   pte_t *pte;
   uint64 pa;
   
-  pte = walk(kernel_pagetable, va, 0);
+  pte = walk(myproc()->kpagetable, va, 0);
   if(pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
