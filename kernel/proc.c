@@ -41,7 +41,7 @@ procinit(void)
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;
   }
-  kvminithart();
+  // kvminithart();
 }
 
 // Must be called with interrupts disabled,
@@ -153,10 +153,14 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  if(p->kstack)
+    uvmunmap(p->kpagetable, p->kstack, 1, 1);
+  p->kstack = 0;
+  if(p->kpagetable)
+    proc_freekpagetable(p->kpagetable);
+  p->kpagetable = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
-  if(p->kpagetable)
-    proc_freekpagetable(p->kpagetable,0);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -212,20 +216,21 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 }
 
 void
-proc_freekpagetable(pagetable_t pagetable,int level)
+proc_freekpagetable(pagetable_t pagetable)
 {
-  if(level == 2){
-    kfree((void*)pagetable);
-    return;
-  }
-  for(int i=0;i<512;i++){
+for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
-    if((pte && PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
-      // 中间节点 
-      proc_freekpagetable(pagetable,level+1);
+    if (pte & PTE_V){
+		pagetable[i] = 0;
+		if ((pte & (PTE_R|PTE_W|PTE_X)) == 0) {
+		  uint64 child = PTE2PA(pte);
+		  proc_freekpagetable((pagetable_t)child);
+		}
+    } else if(pte & PTE_V){
+      panic("kvmfree: leaf");
     }
   }
-  kfree(pagetable);
+  kfree((void*)pagetable);
 }
 // a user program that calls exec("/init")
 // od -t xC initcode

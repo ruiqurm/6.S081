@@ -44,3 +44,31 @@ vmprint(pagetable_t pagetable,int level){
 
 # A kernel page table per process
 这个lab的测试似乎有点问题，我第一遍写的时候其实并没有符合要求，然而还是过了.后面看了别人的写法才发现自己写的不对。  
+
+
+## 遇到的问题  
+### 释放错误
+```c
+void
+proc_freekpagetable(pagetable_t pagetable)
+{
+for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V){
+		pagetable[i] = 0;
+		if ((pte & (PTE_R|PTE_W|PTE_X)) == 0) {
+		  uint64 child = PTE2PA(pte);
+		  proc_freekpagetable((pagetable_t)child);
+		}
+    } else if(pte & PTE_V){
+      panic("kvmfree: leaf");
+    }
+  }
+  kfree((void*)pagetable);
+}
+```
+### 忘记释放进程的内核栈
+在`freeproc`中，不仅要释放掉`kernel pagetable`，还要记得释放掉
+```c
+
+```
