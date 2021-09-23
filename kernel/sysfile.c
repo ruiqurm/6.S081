@@ -485,32 +485,120 @@ sys_pipe(void)
   return 0;
 }
 
-
-/**
- * void *mmap(void *addr, unsigned length, int prot, int flags,
- *          int fd, unsigned offset);
- * 
- * 
- */
+void
+init_mmap_list(struct proc *proc){
+  // initsleeplock(&proc->vma_lock,"mmap-lock");
+  initlock(&proc->vma_cnt_lock,"mmap-count-lock");
+  for(int i = 0; i <16;i++){
+    proc->vma[i].valid = 0;
+    initlock(&proc->vma[i].lock,"mmap-lock");
+  }
+  proc->vma_cnt = 0;
+}
 
 uint64 
 sys_mmap(void){
-  unsigned length;
+  int length;
   int prot,flags;
   struct file* f;
-  struct proc_t *proc;
 
   //ignore addr and offset
   if ( argint(1,&length) < 0 || argint(2,&prot) < 0 ||
        argint(3,&flags)  < 0 || argfd(4,0,&f) <  0){
          return -1; // parameter error
   }
-  proc = myproc();
-  
+  if(length%PGSIZE!=0)return -1;//要求长度对齐
+
   // 找一个可用的地址； 不考虑内存碎片，会一直向上分配
-  return allocate_mmap(length,prot,flags,f);
+  static uint64 next_allocate_addr = MMAP_START;
+  struct proc* proc = myproc();
+
+  acquire(&proc->vma_cnt_lock);
+  if(proc->vma_cnt==PROC_VMA_NUM - 1)panic("lack of vma");
+  struct vma* p = &proc->vma[proc->vma_cnt];
+  proc->vma_cnt++;
+  acquire(&p->lock);
+  
+  // save information to struct 
+  p->base = p->addr = next_allocate_addr;
+  next_allocate_addr = PGROUNDUP(p->addr+length); 
+  filedup(f);  // add file referience
+  p->file  = f;
+  p->flags = flags;
+  p->prot  =  ((prot & PROT_READ)  ? PTE_R : 0)  |
+              ((prot & PROT_WRITE) ? PTE_W : 0)  |
+              ((prot & PROT_EXEC)  ? PTE_X : 0)  |
+              PTE_U;
+              // 括号不能省！
+  p->length  = length;
+  p->valid = 1;
+
+  release(&p->lock);
+  release(&proc->vma_cnt_lock);
+  return (uint64)p->addr;
 }
+
+struct vma*
+mmap_get(uint64 va){
+  struct proc *proc = myproc();
+  // TODO: 
+  for(int i =0;i<PROC_VMA_NUM;i++){
+    acquire(&proc->vma[i].lock);
+    if(proc->vma[i].addr <= va && va < proc->vma[i].addr + proc->vma[i].length ){
+      return &proc->vma[i];
+    }
+    release(&proc->vma[i].lock);
+  }
+  return 0;
+}
+
+int alloc_mmap_page(uint64 va){
+  int n;
+  struct proc* proc = myproc();
+  uint64 mem;
+  struct vma* p = mmap_get(va);
+  if(p==0)return -1; // not found
+  if ( (mem = (uint64)kalloc()) <= 0 ){
+    panic("alloc_mmap_page: no remain space");
+  }
+  
+  if(mappages(proc->pagetable, va, PGSIZE, mem, p->prot) != 0)
+    panic("alloc_mmap_page: mappages error");
+  struct inode *ip = p->file->ip;
+  ilock(ip); 
+  n= readi(ip, 1, va, va - p->base , PGSIZE);
+  if(n<0)panic("alloc_mmap_page: read inode error");
+  if(n!=PGSIZE){
+    memset((void*)(mem+(uint64)n), 0, PGSIZE - n);
+  }
+  iunlock(ip);
+  release(&p->lock);
+  return 0;
+}
+
+
 uint64 
 sys_munmap(void){
-  return -1;
+  uint64 va;
+  int length;
+  if ( argaddr(0,&va) < 0 ||argint(1,&length) < 0){
+    return -1;
+  }
+  struct vma* p = mmap_get(va);
+  struct proc* proc = myproc();
+  if(p==0)return -1; // not found
+  if(va % PGSIZE !=0 || length % PGSIZE!=0 || length < 0)return -1;
+  if(va + length > p->addr + p->length)return -1;
+
+  p->addr   += length;
+  p->length -= length;
+  
+
+  // remove memory map;
+  // if ip(inode pointer) is not NULL, then write it back
+  lazy_uvmunmap(proc->pagetable,va,length,(p->flags & MAP_SHARED)?p->file->ip:0);  
+
+  release(&p->lock);
+
+  return 0;
 }

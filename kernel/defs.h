@@ -105,10 +105,7 @@ void            yield(void);
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
-void 			init_mmap_list(struct proc *p);
-void*           alloc_mmap(int size,int prot,int flags,struct file* f);
-int				alloc_mmap_page(uint64 va);
-void            free_mmap(struct mmap_t* old);
+
 
 // swtch.S
 void            swtch(struct context*, struct context*);
@@ -190,3 +187,9 @@ void            virtio_disk_intr(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+//sysfile.c
+void 			init_mmap_list(struct proc *p);
+void* 			mmap(int size,int prot,int flags,struct file* f);
+int  			alloc_mmap_page(uint64 va);
+int             munmap(uint64 va,int length);

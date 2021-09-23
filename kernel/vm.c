@@ -436,7 +436,6 @@ lazy_uvmunmap(pagetable_t pagetable, uint64 va,int size,struct inode *ip)
 {
   uint64 a,upper;
   pte_t *pte;
-
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
   upper = PGROUNDUP(va + size);
@@ -453,5 +452,7 @@ lazy_uvmunmap(pagetable_t pagetable, uint64 va,int size,struct inode *ip)
     kfree((void*)pa);
     *pte = 0;
   }
-  iunlockput(ip);
+  if(ip)iunlock(ip);
 }
+
+

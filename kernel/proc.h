@@ -1,5 +1,4 @@
-#include"sleeplock.h"
-#include"file.h"
+// #include"file.h"
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -84,12 +83,13 @@ struct trapframe {
 
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
-struct mmap_t{
+#define PROC_VMA_NUM 16
+struct vma{
   uint64 addr;
-  struct mmap_t *next;
-  struct spinlock lock;
+  uint64 base;
   struct file* file;
-  unsigned size;
+  struct spinlock lock;
+  unsigned length;
   int prot;
   int flags;
   int valid; 
@@ -118,9 +118,7 @@ struct proc {
   char name[16];               // Process name (debugging)
 
   // mmap
-  // struct spinlock mmap_lock;
-  struct sleeplock mmap_lock;
-  struct mmap_t head;
-  struct mmap_t mmap_buf[16];
-
+  struct vma vma[16];
+  int   vma_cnt;
+  struct spinlock vma_cnt_lock;
 };
