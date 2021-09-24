@@ -12,7 +12,7 @@
 #define MAP_SHARED      0x01
 #define MAP_PRIVATE     0x02
 
-#define MMAP_START 1L << 36
+#define MMAP_START (1L << 36)
 #define MMAP_SIZE  0x80000000 // 2GiB
 #define MMAP_END   MMAP_START + MMAP_SIZE 
 

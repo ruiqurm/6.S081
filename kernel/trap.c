@@ -5,7 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-
+#include "fcntl.h"
 struct spinlock tickslock;
 uint ticks;
 
@@ -68,7 +68,11 @@ usertrap(void)
   } else if (r_scause() ==13 || r_scause() == 15){
     // handling page fault
     // printf("trap\n");
-    alloc_mmap_page(r_stval());
+    uint64 addr = r_stval();
+    if(addr >=MMAP_START && addr<=MMAP_END)
+      alloc_mmap_page(addr);
+    else
+      p->killed = 1;
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {

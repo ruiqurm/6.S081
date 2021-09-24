@@ -559,7 +559,8 @@ mmap_get(uint64 va){
   struct proc *proc = myproc();
   for(int i =0;i<PROC_VMA_NUM;i++){
     acquire(&proc->vma[i].lock);
-    if(proc->vma[i].addr <= va && va < proc->vma[i].addr + proc->vma[i].length ){
+    // printf("[%d]%d %p %d\n",i,proc->vma[i].valid,proc->vma[i].addr,proc->vma[i].length);
+    if(proc->vma[i].valid && proc->vma[i].addr <= va && va < proc->vma[i].addr + proc->vma[i].length ){
       return &proc->vma[i];
     }
     release(&proc->vma[i].lock);
@@ -572,7 +573,11 @@ int alloc_mmap_page(uint64 va){
   struct proc* proc = myproc();
   uint64 mem;
   struct vma* p = mmap_get(va);
-  if(p==0)return -1; // not found
+  if(p==0){
+    printf("va:%p\n",va);
+    panic("not found\n");
+    return -1; // not found
+  }
   if ( (mem = (uint64)kalloc()) <= 0 ){
     panic("alloc_mmap_page: no remain space");
   }
@@ -619,11 +624,27 @@ sys_munmap(void){
   release(&p->lock); // TODO:???
   lazy_uvmunmap(proc->pagetable,va,length,(p->flags & MAP_SHARED)?p->file->ip:0,p->base);  
   
-  if(length ==0){
+  if(p->length ==0){
+    // printf("clean\n");
     p->valid = 0;
     fileclose(p->file);
   }
   // printf("off2:%d\n",mycpu()->noff);
 
   return 0;
+}
+
+void
+clean_mmap(void){
+  struct proc* proc = myproc();
+  struct vma* p;
+  for(int i=0;i<PROC_VMA_NUM; i++){
+    p = &proc->vma[i];
+    if(p->valid){
+      lazy_uvmunmap(proc->pagetable,p->addr,p->length,(p->flags & MAP_SHARED)?p->file->ip:0,p->base);  
+      p->valid = 0;
+      fileclose(p->file);
+      printf("ref:%d\n",p->file->ref);
+    }
+  }
 }

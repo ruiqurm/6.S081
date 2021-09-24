@@ -193,3 +193,4 @@ void 			init_mmap_list(struct proc *p);
 void* 			mmap(int size,int prot,int flags,struct file* f);
 int  			alloc_mmap_page(uint64 va);
 int             munmap(uint64 va,int length);
+void			clean_mmap(void);

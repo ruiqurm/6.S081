@@ -299,6 +299,26 @@ fork(void)
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
 
+  // deal with mmap
+  acquire(&p->vma_cnt_lock); // avoid new vma creating
+  if (p->vma_cnt){
+    for(int i =0;i < PROC_VMA_NUM;i++){
+      acquire(&p->vma[i].lock);
+      if(p->vma[i].valid){
+        // printf("[%d],addr:%p,length:%d\n",i,p->vma[i].addr,p->vma[i].length);
+        np->vma[i].addr = p->vma[i].addr;
+        np->vma[i].base = p->vma[i].base;
+        np->vma[i].length = p->vma[i].length;
+        filedup(p->vma[i].file);
+        np->vma[i].file = p->vma[i].file;
+        np->vma[i].flags = p->vma[i].flags;
+        np->vma[i].prot = p->vma[i].prot;
+        np->vma[i].valid = 1;
+      }
+      release(&p->vma[i].lock);
+    }
+  }
+  release(&p->vma_cnt_lock);
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
@@ -346,6 +366,9 @@ exit(int status)
 
   if(p == initproc)
     panic("init exiting");
+
+  // clean mmap
+  clean_mmap();
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
