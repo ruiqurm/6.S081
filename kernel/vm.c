@@ -432,27 +432,31 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 
 
 void
-lazy_uvmunmap(pagetable_t pagetable, uint64 va,int size,struct inode *ip)
+lazy_uvmunmap(pagetable_t pagetable, uint64 va,int size,struct inode *ip,uint64 base)
 {
   uint64 a,upper;
   pte_t *pte;
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
   upper = PGROUNDUP(va + size);
-  if(ip)ilock(ip);
+
   for(a = va; a < upper; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)continue;
     if((*pte & PTE_V) == 0)continue;
-    if(PTE_FLAGS(*pte) == PTE_V)continue;
+    // if(PTE_FLAGS(*pte) == PTE_V)continue;
     if(ip){
-      if( writei(ip,1,a,a-va,PGSIZE) < 0 )
+      int n;
+      begin_op();
+      ilock(ip);
+      if( (n = writei(ip,1,a,a-base,PGSIZE)) < 0 )
         panic("lazy_uvmunmap: write back failed");
+      iunlock(ip);
+      end_op();    
     }
     uint64 pa = PTE2PA(*pte);
     kfree((void*)pa);
     *pte = 0;
   }
-  if(ip)iunlock(ip);
 }
 
 

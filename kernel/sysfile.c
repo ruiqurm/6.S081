@@ -517,31 +517,46 @@ sys_mmap(void){
   if(proc->vma_cnt==PROC_VMA_NUM - 1)panic("lack of vma");
   struct vma* p = &proc->vma[proc->vma_cnt];
   proc->vma_cnt++;
+  release(&proc->vma_cnt_lock);
+
   acquire(&p->lock);
   
   // save information to struct 
   p->base = p->addr = next_allocate_addr;
   next_allocate_addr = PGROUNDUP(p->addr+length); 
+
+  // 允许的几种情况：
+  // [1] (READ  && (f->readable)) || !READ
+  // [2] (WRITE && (f->writable || SHARED)) || !WRITE
+  int r = (prot & PROT_READ);
+  int w = (prot & PROT_WRITE);
+  int x = (prot & PROT_EXEC);
+  if (!( ((r && (f->readable)) || !r) &&
+         ((w && (f->writable || (flags & MAP_PRIVATE) )) || !w) &&
+         ((x && (f->readable)) || !x)
+     )){
+      //需要判断文件能否读写
+      release(&p->lock);
+      return -1;
+    }
   filedup(f);  // add file referience
   p->file  = f;
   p->flags = flags;
-  p->prot  =  ((prot & PROT_READ)  ? PTE_R : 0)  |
-              ((prot & PROT_WRITE) ? PTE_W : 0)  |
-              ((prot & PROT_EXEC)  ? PTE_X : 0)  |
+  p->prot  =  (r  ? PTE_R : 0)  |
+              (w  ? PTE_W : 0)  |
+              (x  ? PTE_X : 0)  |
               PTE_U;
               // 括号不能省！
   p->length  = length;
   p->valid = 1;
 
   release(&p->lock);
-  release(&proc->vma_cnt_lock);
   return (uint64)p->addr;
 }
 
 struct vma*
 mmap_get(uint64 va){
   struct proc *proc = myproc();
-  // TODO: 
   for(int i =0;i<PROC_VMA_NUM;i++){
     acquire(&proc->vma[i].lock);
     if(proc->vma[i].addr <= va && va < proc->vma[i].addr + proc->vma[i].length ){
@@ -587,18 +602,28 @@ sys_munmap(void){
   struct vma* p = mmap_get(va);
   struct proc* proc = myproc();
   if(p==0)return -1; // not found
-  if(va % PGSIZE !=0 || length % PGSIZE!=0 || length < 0)return -1;
-  if(va + length > p->addr + p->length)return -1;
+  if(va % PGSIZE !=0 || length % PGSIZE!=0 || length < 0){
+    release(&p->lock);
+    return -1;
+  }
+  if(va + length > p->addr + p->length){ // out of range
+    release(&p->lock);
+    return -1;
+  }
 
   p->addr   += length;
   p->length -= length;
-  
-
+  // printf("off1:%d\n",mycpu()->noff);
   // remove memory map;
   // if ip(inode pointer) is not NULL, then write it back
-  lazy_uvmunmap(proc->pagetable,va,length,(p->flags & MAP_SHARED)?p->file->ip:0);  
-
-  release(&p->lock);
+  release(&p->lock); // TODO:???
+  lazy_uvmunmap(proc->pagetable,va,length,(p->flags & MAP_SHARED)?p->file->ip:0,p->base);  
+  
+  if(length ==0){
+    p->valid = 0;
+    fileclose(p->file);
+  }
+  // printf("off2:%d\n",mycpu()->noff);
 
   return 0;
 }

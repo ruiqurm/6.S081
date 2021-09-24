@@ -172,7 +172,7 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
-void            lazy_uvmunmap(pagetable_t pagetable, uint64 va,int size,struct inode *ip);
+void            lazy_uvmunmap(pagetable_t pagetable, uint64 va,int size,struct inode *ip,uint64 base);
 
 // plic.c
 void            plicinit(void);
