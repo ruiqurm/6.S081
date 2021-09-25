@@ -302,22 +302,25 @@ fork(void)
   // deal with mmap
   acquire(&p->vma_cnt_lock); // avoid new vma creating
   if (p->vma_cnt){
+    int* cnt = &np->vma_cnt;
     for(int i =0;i < PROC_VMA_NUM;i++){
       acquire(&p->vma[i].lock);
       if(p->vma[i].valid){
         // printf("[%d],addr:%p,length:%d\n",i,p->vma[i].addr,p->vma[i].length);
-        np->vma[i].addr = p->vma[i].addr;
-        np->vma[i].base = p->vma[i].base;
-        np->vma[i].length = p->vma[i].length;
+        np->vma[*cnt].addr = p->vma[i].addr;
+        np->vma[*cnt].base = p->vma[i].base;
+        np->vma[*cnt].length = p->vma[i].length;
         filedup(p->vma[i].file);
-        np->vma[i].file = p->vma[i].file;
-        np->vma[i].flags = p->vma[i].flags;
-        np->vma[i].prot = p->vma[i].prot;
-        np->vma[i].valid = 1;
+        np->vma[*cnt].file = p->vma[i].file;
+        np->vma[*cnt].flags = p->vma[i].flags;
+        np->vma[*cnt].prot = p->vma[i].prot;
+        np->vma[*cnt].valid = 1;
+        (*cnt)++; // 注意如果不加括号先算++
       }
       release(&p->vma[i].lock);
     }
   }
+  //b kernel/proc.c:310
   release(&p->vma_cnt_lock);
   safestrcpy(np->name, p->name, sizeof(p->name));
 
