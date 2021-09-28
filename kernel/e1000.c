@@ -45,11 +45,11 @@ e1000_init(uint32 *xregs)
     tx_ring[i].status = E1000_TXD_STAT_DD;
     tx_mbufs[i] = 0;
   }
-  regs[E1000_TDBAL] = (uint64) tx_ring;
+  regs[E1000_TDBAL] = (uint64) tx_ring; // 设置Program the Transmit Descriptor 位置
   if(sizeof(tx_ring) % 128 != 0)
     panic("e1000");
   regs[E1000_TDLEN] = sizeof(tx_ring);
-  regs[E1000_TDH] = regs[E1000_TDT] = 0;
+  regs[E1000_TDH] = regs[E1000_TDT] = 0; // TDH: Transmit头指针； TDT尾指针
   
   // [E1000 14.4] Receive initialization
   memset(rx_ring, 0, sizeof(rx_ring));
@@ -68,23 +68,23 @@ e1000_init(uint32 *xregs)
 
   // filter by qemu's MAC address, 52:54:00:12:34:56
   regs[E1000_RA] = 0x12005452;
-  regs[E1000_RA+1] = 0x5634 | (1<<31);
+  regs[E1000_RA+1] = 0x5634 | (1<<31); // 1<<31 表示高位有效
   // multicast table
   for (int i = 0; i < 4096/32; i++)
     regs[E1000_MTA + i] = 0;
 
   // transmitter control bits.
   regs[E1000_TCTL] = E1000_TCTL_EN |  // enable
-    E1000_TCTL_PSP |                  // pad short packets
-    (0x10 << E1000_TCTL_CT_SHIFT) |   // collision stuff
-    (0x40 << E1000_TCTL_COLD_SHIFT);
+    E1000_TCTL_PSP |                  // pad short packets 填充报文使其长度达到64
+    (0x10 << E1000_TCTL_CT_SHIFT) |   // collision stuff  最大指数回退次数，这里是10
+    (0x40 << E1000_TCTL_COLD_SHIFT);  // CSMA/CD最大距离，全双工是64字节时间
   regs[E1000_TIPG] = 10 | (8<<10) | (6<<20); // inter-pkt gap
 
   // receiver control bits.
   regs[E1000_RCTL] = E1000_RCTL_EN | // enable receiver
     E1000_RCTL_BAM |                 // enable broadcast
     E1000_RCTL_SZ_2048 |             // 2048-byte rx buffers
-    E1000_RCTL_SECRC;                // strip CRC
+    E1000_RCTL_SECRC;                // strip CRC  去掉CRC的部分传给上层
   
   // ask e1000 for receive interrupts.
   regs[E1000_RDTR] = 0; // interrupt after every received packet (no timer)
@@ -102,7 +102,20 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  
+  acquire(&e1000_lock);
+  int tail = regs[E1000_TDT];
+  if ( (tx_ring[tail].status & E1000_TXD_STAT_DD) ==0){
+    // the queue is full; should wait for the NIC
+    release(&e1000_lock);
+    return -1;
+  }
+  // mbuffree((struct mbuf *)tx_ring[tail].addr);
+
+  tx_ring[tail].length = m->len;
+  tx_ring[tail].addr   = (uint64)m->head;
+  tx_ring[tail].cmd = E1000_TXD_CMD_RS| ((m->next==0)?E1000_TXD_CMD_EOP:0);
+  regs[E1000_TDT] = (tail + 1)% TX_RING_SIZE;
+  release(&e1000_lock);
   return 0;
 }
 
@@ -115,6 +128,21 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  acquire(&e1000_lock);
+  int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  while(rx_ring[idx].status & E1000_RXD_STAT_DD){
+    rx_mbufs[idx]->len = rx_ring[idx].length;// replace as real length
+    net_rx(rx_mbufs[idx]); // will free mbuf
+    struct mbuf *buf = mbufalloc(0);//re-allocate
+    rx_ring[idx].addr = (uint64)buf->head;
+    rx_ring[idx].status = 0;
+    regs[E1000_RDT] = idx;
+    idx = (idx + 1) % RX_RING_SIZE;
+  }
+  release(&e1000_lock);
+  // printf("%d\n",idx);
+  // regs[E1000_RDT] = (tail - 1) % RX_RING_SIZE;
+  printf("recv done\n");
 }
 
 void

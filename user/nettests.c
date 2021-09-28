@@ -25,21 +25,21 @@ ping(uint16 sport, uint16 dport, int attempts)
     fprintf(2, "ping: connect() failed\n");
     exit(1);
   }
-
+  printf("a");
   for(int i = 0; i < attempts; i++) {
     if(write(fd, obuf, strlen(obuf)) < 0){
       fprintf(2, "ping: send() failed\n");
       exit(1);
     }
   }
-
+  printf("b");
   char ibuf[128];
   int cc = read(fd, ibuf, sizeof(ibuf)-1);
   if(cc < 0){
     fprintf(2, "ping: recv() failed\n");
     exit(1);
   }
-
+  printf("c\n");
   close(fd);
   ibuf[cc] = '\0';
   if(strcmp(ibuf, "this is the host!") != 0){
