@@ -19,7 +19,8 @@ static struct mbuf *rx_mbufs[RX_RING_SIZE];
 // remember where the e1000's registers live.
 static volatile uint32 *regs;
 
-struct spinlock e1000_lock;
+struct spinlock e1000_tlock;
+struct spinlock e1000_rlock;
 
 // called by pci_init().
 // xregs is the memory address at which the
@@ -29,7 +30,8 @@ e1000_init(uint32 *xregs)
 {
   int i;
 
-  initlock(&e1000_lock, "e1000");
+  initlock(&e1000_tlock, "e1000-tx");
+  initlock(&e1000_rlock, "e1000-rx");
 
   regs = xregs;
 
@@ -102,20 +104,23 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  acquire(&e1000_lock);
+  acquire(&e1000_tlock);
   int tail = regs[E1000_TDT];
   if ( (tx_ring[tail].status & E1000_TXD_STAT_DD) ==0){
     // the queue is full; should wait for the NIC
-    release(&e1000_lock);
+    release(&e1000_tlock);
     return -1;
   }
+  if(tx_mbufs[tail]){
+    mbuffree(tx_mbufs[tail]);
+  }
   // mbuffree((struct mbuf *)tx_ring[tail].addr);
-
+  tx_mbufs[tail] = m;
   tx_ring[tail].length = m->len;
   tx_ring[tail].addr   = (uint64)m->head;
-  tx_ring[tail].cmd = E1000_TXD_CMD_RS| ((m->next==0)?E1000_TXD_CMD_EOP:0);
+  tx_ring[tail].cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
   regs[E1000_TDT] = (tail + 1)% TX_RING_SIZE;
-  release(&e1000_lock);
+  release(&e1000_tlock);
   return 0;
 }
 
@@ -128,21 +133,19 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
-  acquire(&e1000_lock);
+    acquire(&e1000_rlock); 
   int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
   while(rx_ring[idx].status & E1000_RXD_STAT_DD){
     rx_mbufs[idx]->len = rx_ring[idx].length;// replace as real length
     net_rx(rx_mbufs[idx]); // will free mbuf
     struct mbuf *buf = mbufalloc(0);//re-allocate
+    rx_mbufs[idx] = buf;
     rx_ring[idx].addr = (uint64)buf->head;
     rx_ring[idx].status = 0;
     regs[E1000_RDT] = idx;
     idx = (idx + 1) % RX_RING_SIZE;
   }
-  release(&e1000_lock);
-  // printf("%d\n",idx);
-  // regs[E1000_RDT] = (tail - 1) % RX_RING_SIZE;
-  printf("recv done\n");
+  if(holding(&e1000_rlock))  release(&e1000_rlock);
 }
 
 void

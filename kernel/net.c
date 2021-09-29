@@ -331,14 +331,20 @@ net_rx_ip(struct mbuf *m)
   if (iphdr->ip_vhl != ((4 << 4) | (20 >> 2)))
     goto fail;
   // validate IP checksum
-  if (in_cksum((unsigned char *)iphdr, sizeof(*iphdr)))
+  if (in_cksum((unsigned char *)iphdr, sizeof(*iphdr))){
+    printf("b\n");
     goto fail;
+  }
   // can't support fragmented IP packets
-  if (htons(iphdr->ip_off) != 0)
+  if (htons(iphdr->ip_off) != 0){
+    printf("c\n");
     goto fail;
+  }
   // is the packet addressed to us?
-  if (htonl(iphdr->ip_dst) != local_ip)
+  if (htonl(iphdr->ip_dst) != local_ip){
+    printf("%p %p\n",iphdr->ip_dst,local_ip);
     goto fail;
+  }
   // can only support UDP
   if (iphdr->ip_p != IPPROTO_UDP)
     goto fail;
