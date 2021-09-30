@@ -2,7 +2,7 @@
 #include "kernel/net.h"
 #include "kernel/stat.h"
 #include "user/user.h"
-
+#define COMPRESS_FLAG 0xc0
 //
 // send a UDP packet to the localhost (outside of qemu),
 // and receive a response.
@@ -170,8 +170,8 @@ dns_rep(uint8 *ibuf, int cc)
       len += 4;
     }
   }
-
-  if(len != cc) {
+  // 可能DNS服务器发了additional info
+  if(len < cc && *(ibuf+len+1) == 0) {
     printf("Processed %d data bytes but received %d\n", len, cc);
     exit(1);
   }
