@@ -135,6 +135,9 @@ found:
   ukvmmap(p->kpagetable,va,(uint64)pa,PGSIZE, PTE_R | PTE_W);
   p->kstack = va;
 
+  // map user proc stack
+
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -221,11 +224,11 @@ proc_freekpagetable(pagetable_t pagetable)
 for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
     if (pte & PTE_V){
-		pagetable[i] = 0;
-		if ((pte & (PTE_R|PTE_W|PTE_X)) == 0) {
-		  uint64 child = PTE2PA(pte);
-		  proc_freekpagetable((pagetable_t)child);
-		}
+      pagetable[i] = 0;
+      if ((pte & (PTE_R|PTE_W|PTE_X)) == 0) {
+        uint64 child = PTE2PA(pte);
+        proc_freekpagetable((pagetable_t)child);
+      }
     } else if(pte & PTE_V){
       panic("kvmfree: leaf");
     }
@@ -249,7 +252,7 @@ void
 userinit(void)
 {
   struct proc *p;
-
+  uint64 mem;
   p = allocproc();
   initproc = p;
   
@@ -257,6 +260,12 @@ userinit(void)
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
+
+  // map to kernel
+  mem = walkaddr(p->pagetable,0);// addr just mapping above;
+  if(mappages(p->kpagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X)<0){
+    panic("copying error");
+  }
 
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
@@ -283,8 +292,10 @@ growproc(int n)
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    ukvmapcopy(p->pagetable,p->kpagetable,PGROUNDDOWN(p->sz),p->sz+n);
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    ukvmapfree(p->kpagetable,p->sz,p->sz+n);
   }
   p->sz = sz;
   return 0;
@@ -312,6 +323,8 @@ fork(void)
   }
   np->sz = p->sz;
 
+  // set kernel pagetable map for child
+  ukvmapcopy(np->pagetable,np->kpagetable,0,np->sz);
   np->parent = p;
 
   // copy saved user registers.
@@ -331,9 +344,8 @@ fork(void)
   pid = np->pid;
 
   np->state = RUNNABLE;
-
   release(&np->lock);
-
+  
   return pid;
 }
 

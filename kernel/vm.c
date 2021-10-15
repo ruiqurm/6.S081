@@ -404,23 +404,24 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  uint64 n, va0, pa0;
+  // uint64 n, va0, pa0;
 
-  while(len > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > len)
-      n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+  // while(len > 0){
+  //   va0 = PGROUNDDOWN(srcva);
+  //   pa0 = walkaddr(pagetable, va0);
+  //   if(pa0 == 0)
+  //     return -1;
+  //   n = PGSIZE - (srcva - va0);
+  //   if(n > len)
+  //     n = len;
+  //   memmove(dst, (void *)(pa0 + (srcva - va0)), n);
 
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
-  }
-  return 0;
+  //   len -= n;
+  //   dst += n;
+  //   srcva = va0 + PGSIZE;
+  // }
+  // return 0;
+  return copyin_new(pagetable,dst,srcva,len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -467,7 +468,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 }
 
 void
-vmprint(pagetable_t pagetable,int level){
+_vmprint(pagetable_t pagetable,int level){
   if(level==0){
     printf("page table %p\n",pagetable);
   }
@@ -481,8 +482,50 @@ vmprint(pagetable_t pagetable,int level){
       printf("%d: pte %p pa %p\n",i,pte,child);
       if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
         // 中间PTE
-        vmprint((pagetable_t)child,level+1);
+        _vmprint((pagetable_t)child,level+1);
       }
     }
+  }
+}
+
+void vmprint(pagetable_t pagetable){
+  _vmprint(pagetable,0);
+}
+
+
+// 
+int
+ukvmapcopy(pagetable_t pagetable, pagetable_t kpagetable,uint64 from,uint64 to){
+  // printf("from %p to %p\n",from,to);
+  pte_t *pte;
+  pte_t *k_pte;
+  uint64 i;
+  uint flags;
+  uint64 mem;
+  if(from % PGSIZE !=0)panic("not align");
+  for(i = from; i < to; i += PGSIZE){
+    pte = walk(pagetable,i,0);
+    mem = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    flags &= ~PTE_U;
+    if((k_pte=walk(kpagetable,i,0))!=0){
+      if(PTE2PA(*k_pte)==mem)continue;
+      else{
+        *k_pte = 0; 
+      }
+    }
+    if(mappages(kpagetable, i, PGSIZE, (uint64)mem, flags) != 0){
+      panic("ukvmapcopy failed");
+    }
+  }
+  return 0;
+}
+
+void 
+ukvmapfree(pagetable_t kpagetable,uint64 oldsz,uint64 newsz){
+  // printf("free\n");
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(kpagetable, PGROUNDUP(newsz), npages, 0);
   }
 }
